@@ -154,7 +154,7 @@ Threads cannot be copied (no copy constructor) but can be moved. This ensures on
 
 ### Compilation
 ```bash
-g++ -std=c++11 -pthread main.cpp -o threading_demo
+g++ -std=c++11 -pthread demo_002.cpp -o threading_demo
 ```
 
 ### Execution
@@ -199,6 +199,229 @@ This example teaches:
 - Thread ownership and lifetime management
 - How to query system threading capabilities
 - Exception-safe thread management patterns
+
+## Requirements
+
+- C++11 or later
+- POSIX threads library (linked with `-pthread`)
+- Compiler: GCC, Clang, or MSVC with C++11 support
+
+</details>
+
+<details>
+
+<summary>2. Thread Creation Methods [demo__003.cpp]</summary>
+
+## Overview
+
+This program demonstrates the various ways to create threads in C++11 and beyond. It showcases different object passing mechanisms, lambda functions, and member function invocation patterns with threads.
+
+## ⚠️ Critical Bug Warning
+
+**This code has a serious bug**: Threads `t1`, `t2`, `t3`, `t4`, and `t5` are never joined or detached before the program exits. This will cause the program to call `std::terminate()` and crash. In production code, every thread must be either joined or detached before destruction.
+
+## Thread Creation Methods Demonstrated
+
+### 1. Passing Objects by Value (Copy)
+```cpp
+std::thread t1(cl, 1);
+```
+- Creates a **copy** of the object `cl`
+- Calls `operator()(1)` on the copy
+- Safe: the thread has its own independent copy
+- Cost: Memory overhead from copying
+
+### 2. Passing Objects by Reference
+```cpp
+std::thread t2(std::ref(cl), 2);
+```
+- Wraps `cl` with `std::ref()` to pass by reference
+- Calls `operator()(2)` on the original object
+- Efficient: No copying overhead
+- **Danger**: Must ensure the object outlives the thread
+
+### 3. Passing Objects with Move Semantics
+```cpp
+std::thread t3(std::move(cl), 3);
+```
+- Transfers ownership of `cl` to the thread
+- Calls `operator()(3)` on the moved object
+- After this, `cl` is in a valid but unspecified state
+- Efficient for large objects
+
+### 4. Creating Temporary Objects with Arguments
+```cpp
+std::thread t4(MYCLASS(), 4, "aaaa");
+```
+- Creates a temporary `MYCLASS` object inline
+- Attempts to call `operator()(4, "aaaa")`
+- **Note**: This requires a matching operator() signature
+
+### 5. Creating Temporary Objects (Parameterless)
+```cpp
+std::thread t5(MYCLASS());
+```
+- Creates a temporary `MYCLASS` object inline
+- Calls the parameterless `operator()()`
+
+### 6. Lambda Functions
+```cpp
+std::thread t6([](std::string s){
+    std::cout << "output: " << s+s << std::endl; 
+    return s+s;
+}, "CO");
+```
+- Defines an anonymous function inline
+- Lambda syntax: `[captures](parameters){ body }`
+- Empty `[]` means no captured variables
+- Return values from lambdas in threads are ignored
+- **This thread is properly joined!**
+
+### 7. Member Functions with Object Copy
+```cpp
+std::thread t7(&MYCLASS::func1, cl, 7, "CO");
+```
+- `&MYCLASS::func1` is a pointer to member function
+- First argument after the function pointer is the object
+- `cl` is **copied** into the thread
+- Equivalent to: `(copy_of_cl).func1(7, "CO")`
+- **This thread is properly joined!**
+
+### 8. Member Functions with Object Pointer
+```cpp
+std::thread t8(&MYCLASS::func1, &cl, 8, "CO");
+```
+- Uses `&cl` (pointer) instead of `cl` (copy)
+- Calls member function on the **original** object
+- Equivalent to: `(&cl)->func1(8, "CO")`
+- More efficient (no copying), but requires careful lifetime management
+- **This thread is properly joined!**
+
+## Key Concepts
+
+### Functors (Function Objects)
+The `MYCLASS` has overloaded `operator()`, making its objects callable:
+```cpp
+MYCLASS obj;
+obj();       // Calls operator()()
+obj(5);      // Calls operator()(int)
+```
+
+### Thread Parameters
+When you pass arguments to a thread:
+1. The first argument is what to execute (function, lambda, functor)
+2. Subsequent arguments are passed to that callable
+3. Arguments are **copied by default** (use `std::ref()` for references)
+
+### Member Function Pointers
+Format: `&ClassName::memberFunction`
+```cpp
+std::thread t(&MYCLASS::func1, object_or_pointer, args...);
+```
+- If the second argument is an object: it's copied
+- If the second argument is a pointer: the original is used
+
+### Lambda Syntax
+```cpp
+[capture_list](parameters) -> return_type { body }
+```
+- `[]` - Capture nothing
+- `[=]` - Capture all by value
+- `[&]` - Capture all by reference
+- `[x, &y]` - Capture x by value, y by reference
+
+## Building and Running
+
+### Compilation
+```bash
+g++ -std=c++11 -pthread demo_003.cpp -o thread_methods
+```
+
+### Execution
+```bash
+./thread_methods
+```
+
+## Expected Output
+
+```
+output: COCO
+7 CO
+8 CO
+```
+
+**Then the program will crash** with an error like:
+```
+terminate called without an active exception
+Aborted (core dumped)
+```
+
+This happens because threads `t1` through `t5` are never joined.
+
+## Fixed Version
+
+To fix this code, you must join or detach all threads:
+
+```cpp
+int main(){
+    MYCLASS cl;
+    
+    std::thread t1(cl, 1);
+    std::thread t2(std::ref(cl), 2);
+    std::thread t3(std::move(cl), 3);
+    std::thread t4(MYCLASS(), 4, "aaaa");  
+    std::thread t5(MYCLASS()); 
+    
+    // Join all threads before they go out of scope
+    t1.join();
+    t2.join();
+    t3.join();
+    t4.join();
+    t5.join();
+    
+    std::thread t6([](std::string s){
+        std::cout << "output: " << s+s << std::endl; 
+        return s+s;
+    }, "CO");
+    t6.join();
+    
+    std::thread t7(&MYCLASS::func1, cl, 7, "CO");
+    t7.join();
+    
+    std::thread t8(&MYCLASS::func1, &cl, 8, "CO");
+    t8.join();
+    
+    return 0;
+}
+```
+
+## When to Use Each Method
+
+| Method | Use Case | Performance | Safety |
+|--------|----------|-------------|--------|
+| Copy (value) | Small objects, thread-local data needed | Slower (copy overhead) | Very safe |
+| Reference (`std::ref`) | Large objects, shared state | Fast | Risky (lifetime management) |
+| Move (`std::move`) | Unique ownership transfer | Fast | Safe (clear ownership) |
+| Pointer | Member functions on existing objects | Fastest | Risky (lifetime management) |
+| Lambda | Simple, inline operations | Depends on captures | Flexible |
+
+## Common Pitfalls
+
+1. **Forgetting to join/detach**: Always join or detach threads before they're destroyed
+2. **Dangling references**: When using `std::ref()` or pointers, ensure the object outlives the thread
+3. **Using moved-from objects**: After `std::move()`, don't use the original object
+4. **Lambda captures**: Be careful capturing local variables by reference
+5. **Return values**: Thread functions can return values, but they're ignored (use futures for return values)
+
+## Learning Objectives
+
+This example teaches:
+- Multiple ways to create threads in C++
+- How to pass objects to threads (copy, reference, move)
+- How to call member functions in threads
+- Lambda functions with threads
+- The critical importance of thread lifetime management
+- Function objects and operator overloading
 
 ## Requirements
 
