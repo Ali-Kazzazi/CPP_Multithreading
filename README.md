@@ -1,4 +1,4 @@
-# Multithreading
+# C++ Multithreading
 
 <details>
 
@@ -210,7 +210,7 @@ This example teaches:
 
 <details>
 
-<summary>2. Thread Creation Methods [demo__003.cpp]</summary>
+<summary>3. Thread Creation Methods [demo_003.cpp]</summary>
 
 ## Overview
 
@@ -428,5 +428,316 @@ This example teaches:
 - C++11 or later
 - POSIX threads library (linked with `-pthread`)
 - Compiler: GCC, Clang, or MSVC with C++11 support
+
+</details>
+
+<details>
+<summary>4. Shared Resources Protection [demo_4.cpp] </summary>
+
+# Mutex and Thread Synchronization
+
+## Overview
+
+This program demonstrates different approaches to thread synchronization in C++, progressing from unsafe code (race conditions) to best practices (RAII and encapsulation). It illustrates why mutexes are necessary and how to use them correctly.
+
+## The Problem: Race Conditions
+
+When multiple threads access shared resources (like `std::cout` or files) simultaneously without synchronization, you get **race conditions** - unpredictable behavior where output gets mixed or corrupted.
+
+## Four Synchronization Approaches
+
+### Demo 1: No Synchronization (❌ Bad)
+```cpp
+void func1() {
+    std::cout << "T1 ---\n";  // Multiple threads writing without protection
+}
+```
+
+**Problem**: Race condition - output from different threads gets interleaved and garbled.
+
+**Example of bad output**:
+```
+T1 ----- 
+m-ain
+T1 --
+main--
+-
+```
+
+### Demo 2: Manual Mutex Locking (⚠️ Acceptable but Risky)
+```cpp
+void dispMessage1(std::string s) {
+    mtx.lock();
+    std::cout << s << std::endl;
+    mtx.unlock();
+}
+```
+
+**Advantages**:
+- Protects the shared resource
+- Prevents race conditions
+- Simple to understand
+
+**Problems**:
+- If an exception occurs between `lock()` and `unlock()`, the mutex stays locked forever (deadlock)
+- Easy to forget to unlock
+- Not exception-safe
+- Verbose and error-prone
+
+### Demo 3: RAII with lock_guard (✅ Good)
+```cpp
+void dispMessage2(std::string s) {
+    std::lock_guard<std::mutex> lock(mtx);
+    std::cout << s << std::endl;
+    // Lock automatically released when 'lock' goes out of scope
+}
+```
+
+**Advantages**:
+- Exception-safe: lock is released even if exceptions occur
+- RAII (Resource Acquisition Is Initialization) pattern
+- Can't forget to unlock
+- Cleaner, more maintainable code
+
+**Use when**: Protecting shared global resources accessed by multiple components
+
+### Demo 4: Encapsulated Mutex (✅ Best Practice)
+```cpp
+class Logger {
+    std::mutex mtx;      // Private mutex
+    std::ofstream f;     // Private resource
+public:
+    void log(std::string s) {
+        std::lock_guard<std::mutex> lock(mtx);
+        f << s << std::endl;
+    }
+};
+```
+
+**Advantages**:
+- Mutex is bound to the resource it protects
+- Impossible to access the resource without the mutex
+- Encapsulation: users can't misuse the resource
+- Each instance has its own mutex (better concurrency)
+- Clear ownership and responsibility
+
+**Use when**: You own the resource and want to provide thread-safe access
+
+## Key Concepts
+
+### What is a Mutex?
+A **mutex** (mutual exclusion) is a synchronization primitive that ensures only one thread can access a shared resource at a time.
+
+### RAII (Resource Acquisition Is Initialization)
+A C++ programming technique where:
+1. Resources are acquired in a constructor
+2. Resources are released in a destructor
+3. Guarantees cleanup even when exceptions occur
+
+`std::lock_guard` is a perfect example of RAII for mutex management.
+
+### Race Condition
+When multiple threads access shared data concurrently and at least one modifies it, without proper synchronization. The outcome depends on unpredictable thread scheduling.
+
+### Deadlock
+When a mutex is locked but never unlocked, causing all threads waiting for it to hang forever.
+
+## Comparison of Approaches
+
+| Approach | Exception-Safe | Easy to Use | Encapsulation | Recommended |
+|----------|----------------|-------------|---------------|-------------|
+| No sync | N/A | ✅ | N/A | ❌ Never |
+| Manual lock/unlock | ❌ | ⚠️ | ❌ | ❌ Avoid |
+| lock_guard | ✅ | ✅ | ⚠️ | ✅ For shared globals |
+| Encapsulated | ✅ | ✅ | ✅ | ✅ For owned resources |
+
+## Building and Running
+
+### Compilation
+```bash
+g++ -std=c++11 -pthread demo_04.cpp -o mutex_demo
+```
+
+### Execution
+```bash
+./mutex_demo
+```
+
+The program will:
+1. Show garbled output from Demo 1 (race condition)
+2. Show clean output from Demo 2 and 3
+3. Create `app.log` file with output from Demo 4
+
+### Checking the Log File
+```bash
+cat app.log
+```
+
+## Expected Output
+
+### Demo 1 (Garbled - Race Condition)
+```
+=== DEMO 1: No Synchronization (Race Condition) ===
+T1 ------ 
+main-
+T1 -
+---
+-- main
+T1 ---
+[...mixed output...]
+```
+
+### Demo 2 & 3 (Clean - Synchronized)
+```
+=== DEMO 2: Manual Mutex Locking ===
+T2 ---
+--- main
+T2 ---
+--- main
+[...clean alternating output...]
+
+=== DEMO 3: RAII Mutex (lock_guard) ===
+T2 ---
+--- main
+T2 ---
+[...clean alternating output...]
+```
+
+### Demo 4 (app.log file)
+```
+T1 ---
+--- main
+T1 ---
+--- main
+[...all entries cleanly written...]
+```
+
+## Best Practices
+
+### 1. Always Use RAII for Mutexes
+❌ **Don't do this**:
+```cpp
+mtx.lock();
+do_something();  // If this throws, mutex stays locked!
+mtx.unlock();
+```
+
+✅ **Do this**:
+```cpp
+std::lock_guard<std::mutex> lock(mtx);
+do_something();  // Exception-safe
+```
+
+### 2. Keep Critical Sections Small
+```cpp
+// ❌ Bad: Locks for too long
+std::lock_guard<std::mutex> lock(mtx);
+expensive_computation();
+std::cout << result << std::endl;
+
+// ✅ Good: Only lock when accessing shared resource
+expensive_computation();
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    std::cout << result << std::endl;
+}
+```
+
+### 3. Bind Mutexes to Resources
+```cpp
+// ✅ Best: Mutex and resource are encapsulated together
+class ThreadSafeQueue {
+    std::mutex mtx;
+    std::queue<int> q;
+public:
+    void push(int val) {
+        std::lock_guard<std::mutex> lock(mtx);
+        q.push(val);
+    }
+};
+```
+
+### 4. Avoid Global Mutexes
+Global mutexes create unnecessary contention. Use encapsulated mutexes when possible.
+
+### 5. Use std::unique_lock for Advanced Features
+If you need to unlock before scope ends or use condition variables:
+```cpp
+std::unique_lock<std::mutex> lock(mtx);
+// Can call lock.unlock() manually if needed
+```
+
+## Common Pitfalls
+
+### 1. Forgetting to Unlock (Manual Locking)
+```cpp
+mtx.lock();
+if (error) return;  // BUG: mutex never unlocked!
+mtx.unlock();
+```
+**Solution**: Use `lock_guard` or `unique_lock`
+
+### 2. Locking the Same Mutex Twice (Deadlock)
+```cpp
+mtx.lock();
+function_that_also_locks_mtx();  // Deadlock!
+mtx.unlock();
+```
+**Solution**: Use `std::recursive_mutex` or restructure code
+
+### 3. Accessing Resource Without Mutex
+```cpp
+class BadLogger {
+    std::mutex mtx;
+    std::ofstream f;  // public - can be accessed without mutex!
+public:
+    std::ofstream& getFile() { return f; }  // BAD!
+};
+```
+**Solution**: Keep resources private, only expose thread-safe methods
+
+### 4. Holding Locks Too Long
+```cpp
+std::lock_guard<std::mutex> lock(mtx);
+expensive_network_call();  // Blocks all other threads!
+```
+**Solution**: Only lock around shared resource access
+
+## When to Use Each Pattern
+
+| Pattern | Use Case |
+|---------|----------|
+| **No synchronization** | Single-threaded code, thread-local data |
+| **Manual lock/unlock** | Never (use RAII instead) |
+| **lock_guard** | Simple mutex locking, can't unlock early |
+| **unique_lock** | Need to unlock before scope ends, condition variables |
+| **Encapsulated mutex** | Own the resource, want to provide thread-safe interface |
+
+## Learning Objectives
+
+This program teaches:
+- Why synchronization is necessary (race conditions)
+- How mutexes work
+- The dangers of manual mutex management
+- RAII pattern and its benefits
+- Encapsulation as a best practice
+- Exception-safe thread synchronization
+- Resource ownership and mutex binding
+
+## Requirements
+
+- C++11 or later
+- POSIX threads library (linked with `-pthread`)
+- Compiler: GCC, Clang, or MSVC with C++11 support
+
+## Further Reading
+
+- `std::unique_lock` for more flexible locking
+- `std::condition_variable` for thread signaling
+- `std::shared_mutex` for reader-writer locks (C++17)
+- `std::scoped_lock` for locking multiple mutexes (C++17)
+
+
+
 
 </details>
