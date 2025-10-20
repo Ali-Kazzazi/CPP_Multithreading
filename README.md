@@ -4,6 +4,8 @@
 
 <summary>1. Thread implementation [demo_001.cpp]</summary>
 
+# Thread implementation
+
 ## Overview
 
 This program demonstrates basic multithreading in C++ using the `<thread>` library. It creates two concurrent threads that print messages to the console: the main thread and a spawned worker thread.
@@ -70,6 +72,8 @@ This example is ideal for understanding:
 <details>
 
 <summary>2. Sending Functors into Threads [demo_002.cpp]</summary>
+
+# Sending Functors into Threads
 
 ## Overview
 
@@ -211,6 +215,8 @@ This example teaches:
 <details>
 
 <summary>3. Thread Creation Methods [demo_003.cpp]</summary>
+
+# Thread Creation Methods
 
 ## Overview
 
@@ -739,5 +745,417 @@ This program teaches:
 
 
 
+
+</details>
+
+<details> 
+<summary>5. Avoiding Data Race: Best Practices [demo_005.cpp] </summary>
+
+# Avoiding Data Race: Best Practices
+
+## Overview
+
+This program demonstrates the three fundamental principles for preventing data races in multithreaded C++ applications. It contrasts unsafe, buggy code with proper, thread-safe implementations to illustrate common pitfalls and their solutions.
+
+## The Three Principles of Data Race Prevention
+
+### 1. Use Mutex to Synchronize Data Access
+Every access to shared data must be protected by a mutex. Without synchronization, concurrent reads and writes lead to undefined behavior.
+
+### 2. Never Leak Handles to Data
+Never return references or pointers to internal data. Doing so allows external code to bypass mutex protection.
+
+### 3. Design Interface Appropriately
+Combine related operations into single atomic actions. Avoid interfaces that require multiple sequential calls where race conditions can occur between calls.
+
+## Code Structure
+
+### Bad Examples (What NOT to Do)
+
+#### ❌ UnsafeCounter - No Synchronization
+```cpp
+class UnsafeCounter {
+public:
+    int count = 0;  // Public, unprotected
+    void increment() { count++; }  // Race condition!
+};
+```
+**Problem**: Multiple threads can read and write `count` simultaneously, causing lost updates.
+
+#### ❌ LeakyStack - Leaking Data Handles
+```cpp
+class LeakyStack {
+    std::vector<int> data;
+public:
+    std::vector<int>& getData() { 
+        return data;  // DANGER: Returns reference to internal data
+    }
+};
+```
+**Problem**: External code can modify `data` without holding the mutex, bypassing all protection.
+
+#### ❌ BadStack - Poor Interface Design
+```cpp
+bool isEmpty();  // Check
+int top();       // Action
+void pop();      // Another action
+```
+**Problem**: TOCTOU (Time-Of-Check-Time-Of-Use) bug. Another thread might modify the stack between `isEmpty()` and `top()` calls.
+
+### Good Examples (Best Practices)
+
+#### ✅ SafeStack - Proper Design
+```cpp
+class SafeStack {
+private:
+    std::mutex mtx;           // Principle 1: Mutex for synchronization
+    std::vector<int> data;    // Principle 2: Private data (no leaks)
+    
+public:
+    // Principle 3: Atomic check-and-action
+    bool tryPop(int& result) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (data.empty()) return false;
+        result = data.back();
+        data.pop_back();
+        return true;  // Check and action combined atomically
+    }
+    
+    // Returns COPY, not reference
+    std::vector<int> getAllData() const {
+        std::lock_guard<std::mutex> lock(mtx);
+        return data;  // Safe: returns a copy
+    }
+};
+```
+
+#### ✅ SafeLogger - Encapsulated Resource
+```cpp
+class SafeLogger {
+private:
+    mutable std::mutex mtx;
+    std::ofstream logFile;  // Private, protected by mtx
+    
+public:
+    void log(const std::string& message) {
+        std::lock_guard<std::mutex> lock(mtx);
+        logFile << message << std::endl;
+    }
+    
+    // Deleted copy operations prevent accidental misuse
+    SafeLogger(const SafeLogger&) = delete;
+    SafeLogger& operator=(const SafeLogger&) = delete;
+};
+```
+
+#### ✅ SafeCounter - Complete Protection
+```cpp
+class SafeCounter {
+private:
+    mutable std::mutex mtx;
+    int count;
+    
+public:
+    void increment() {
+        std::lock_guard<std::mutex> lock(mtx);
+        ++count;
+    }
+    
+    int getCount() const {
+        std::lock_guard<std::mutex> lock(mtx);
+        return count;  // Returns copy, not reference
+    }
+};
+```
+
+## Demonstrations
+
+### Demo 1: Race Condition with Unsafe Counter
+Two threads increment a counter 10,000 times each. Expected result: 20,000. Actual result: unpredictable (often less due to lost updates).
+
+**Output**:
+```
+Expected count: 20000
+Actual count: 17843
+Race condition likely caused incorrect result!
+```
+
+### Demo 2: Data Leak Danger
+Shows how returning a reference to internal data allows external code to modify it without mutex protection.
+
+### Demo 3: Bad Interface Design (TOCTOU Bug)
+Demonstrates the Time-Of-Check-Time-Of-Use vulnerability:
+```cpp
+if (!stack.isEmpty()) {  // Thread A checks
+    // Thread B might pop here!
+    value = stack.top(); // Thread A crashes
+}
+```
+
+### Demo 4: Safe Stack
+Multiple producer and consumer threads safely interact with the stack using atomic operations.
+
+### Demo 5: Safe Logger
+Three threads write to the same log file concurrently without corruption.
+
+**Output in thread_safe.log**:
+```
+[140234567890] Message 0 from thread 1
+[140234567891] Message 0 from thread 2
+[140234567892] Message 0 from thread 3
+...
+```
+
+### Demo 6: Safe Counter
+Two threads increment a counter 10,000 times each. Result: always exactly 20,000.
+
+**Output**:
+```
+Expected count: 20000
+Actual count: 20000
+Perfect! No race condition.
+```
+
+## Building and Running
+
+### Compilation
+```bash
+g++ -std=c++11 -pthread main.cpp -o data_race_demo
+```
+
+### Execution
+```bash
+./data_race_demo
+```
+
+### Check Log File
+```bash
+cat thread_safe.log
+```
+
+## Key Concepts
+
+### Data Race
+Occurs when:
+1. Two or more threads access the same memory location concurrently
+2. At least one access is a write
+3. There is no synchronization
+
+**Result**: Undefined behavior, corrupted data, crashes.
+
+### TOCTOU (Time-Of-Check-Time-Of-Use)
+A race condition where the state changes between checking a condition and acting on it.
+
+**Example**:
+```cpp
+// Bad: Check and use are separate
+if (!isEmpty()) {      // Check at time T1
+    value = top();     // Use at time T2 (state might have changed!)
+}
+
+// Good: Check and use are atomic
+if (tryPop(value)) {   // Check and use happen together
+    // Use value
+}
+```
+
+### Handle Leaking
+Returning references or pointers to internal data that should be protected by a mutex.
+
+**Why it's dangerous**:
+```cpp
+std::vector<int>& data = obj.getData();  // Gets internal reference
+// Now 'data' can be modified without holding obj's mutex!
+data.push_back(42);  // DANGER: No mutex protection
+```
+
+### RAII (Resource Acquisition Is Initialization)
+Using `std::lock_guard` ensures mutex is always released, even during exceptions.
+
+## Best Practices Checklist
+
+### ✅ Always Do
+- [ ] Protect all shared data with mutexes
+- [ ] Use `std::lock_guard` or `std::unique_lock` (RAII)
+- [ ] Keep data members private
+- [ ] Return copies, not references to internal data
+- [ ] Combine check-and-action into single operations
+- [ ] Make mutexes `mutable` for const methods that need to lock
+- [ ] Delete copy constructors for classes with mutexes
+
+### ❌ Never Do
+- [ ] Access shared data without holding a lock
+- [ ] Return references/pointers to protected data
+- [ ] Manually lock/unlock (use RAII instead)
+- [ ] Design interfaces that require multiple calls (TOCTOU risk)
+- [ ] Lock in one function and unlock in another
+- [ ] Hold locks longer than necessary
+
+## Common Patterns
+
+### Pattern 1: Thread-Safe Getter (Return Copy)
+```cpp
+Type getValue() const {
+    std::lock_guard<std::mutex> lock(mtx);
+    return internalValue;  // Returns a copy
+}
+```
+
+### Pattern 2: Atomic Check-and-Action
+```cpp
+bool tryOperation(Result& output) {
+    std::lock_guard<std::mutex> lock(mtx);
+    if (!canPerformOperation()) {
+        return false;
+    }
+    output = performOperation();
+    return true;
+}
+```
+
+### Pattern 3: Exception-Safe Modification
+```cpp
+void modify(const Input& input) {
+    std::lock_guard<std::mutex> lock(mtx);
+    // All operations here are protected
+    // Lock automatically released even if exception occurs
+}
+```
+
+### Pattern 4: Encapsulated Resource
+```cpp
+class ThreadSafeResource {
+private:
+    std::mutex mtx;
+    Resource resource;  // Never exposed
+public:
+    void safeOperation() {
+        std::lock_guard<std::mutex> lock(mtx);
+        resource.doSomething();
+    }
+};
+```
+
+## Comparison Table
+
+| Aspect | Bad Practice | Good Practice |
+|--------|-------------|---------------|
+| **Synchronization** | No mutex | Mutex on all accesses |
+| **Data Access** | Public members | Private members only |
+| **Return Values** | References/pointers | Copies or smart pointers |
+| **Interface** | Separate check/action | Atomic operations |
+| **Lock Management** | Manual lock/unlock | RAII (lock_guard) |
+| **Copy Operations** | Default copy | Deleted for mutex classes |
+
+## Advanced Topics
+
+### When to Use const and mutable
+```cpp
+class ThreadSafe {
+    mutable std::mutex mtx;  // Can be locked in const methods
+    int data;
+    
+public:
+    int getData() const {  // const method
+        std::lock_guard<std::mutex> lock(mtx);  // OK: mtx is mutable
+        return data;
+    }
+};
+```
+
+### Why Delete Copy Operations
+```cpp
+class Logger {
+    std::mutex mtx;  // Mutexes are not copyable
+    
+    // Explicitly delete copy operations
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
+};
+```
+Prevents accidental copying which would break mutex semantics.
+
+### Returning Smart Pointers (Advanced)
+If you must return a pointer:
+```cpp
+std::shared_ptr<const Data> getData() const {
+    std::lock_guard<std::mutex> lock(mtx);
+    return std::make_shared<Data>(internalData);  // Returns copy as smart pointer
+}
+```
+
+## Common Mistakes and Fixes
+
+### Mistake 1: Returning Reference
+```cpp
+// ❌ Bad
+const std::vector<int>& getData() {
+    return data;  // Leaks handle!
+}
+
+// ✅ Good
+std::vector<int> getData() const {
+    std::lock_guard<std::mutex> lock(mtx);
+    return data;  // Returns copy
+}
+```
+
+### Mistake 2: Split Operations
+```cpp
+// ❌ Bad - TOCTOU bug
+if (!queue.empty()) {       // Thread A checks
+    value = queue.front();  // Thread B might clear queue here
+    queue.pop();            // Crash or wrong value!
+}
+
+// ✅ Good - Atomic operation
+if (queue.tryPop(value)) {
+    // value is safely obtained
+}
+```
+
+### Mistake 3: Inconsistent Locking
+```cpp
+// ❌ Bad - Some methods don't lock
+void setValue(int v) { value = v; }  // No lock!
+int getValue() { 
+    std::lock_guard<std::mutex> lock(mtx);
+    return value; 
+}
+
+// ✅ Good - All methods lock
+void setValue(int v) { 
+    std::lock_guard<std::mutex> lock(mtx);
+    value = v; 
+}
+```
+
+## Learning Objectives
+
+This program teaches:
+- The three principles of data race prevention
+- How to identify race conditions
+- Proper mutex usage with RAII
+- Dangers of leaking data handles
+- TOCTOU vulnerabilities and solutions
+- Thread-safe class design patterns
+- When and why to delete copy operations
+- Exception-safe synchronization
+
+## Requirements
+
+- C++11 or later
+- POSIX threads library (linked with `-pthread`)
+- Compiler: GCC, Clang, or MSVC with C++11 support
+
+## Conclusion
+
+Data races are one of the most challenging bugs to find and fix. By following these three principles religiously, you can write thread-safe code that is robust, maintainable, and correct. Always remember:
+
+1. **Synchronize**: Use mutexes for all shared data access
+2. **Encapsulate**: Never leak handles to internal data
+3. **Design Atomically**: Combine related operations
+
+These principles are not optional—they are essential for correct multithreaded programming.
 
 </details>
