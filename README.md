@@ -1,10 +1,18 @@
 # C++ Multithreading
 
-<details>
+## Table of Contents
 
-<summary>1. Thread implementation [demo_001.cpp]</summary>
+- [1. Thread implementation [demo_001.cpp]](#thread-implementation)
+- [2. Sending Functors into Threads [demo_002.cpp]](#sending-functors-into-threads)
+- [3. Thread Creation Methods [demo_003.cpp]](#thread-creation-methods)
+- [4. Mutex and Thread Synchronization [demo_4.cpp]](#mutex-and-thread-synchronization)
+- [5. Avoiding Data Race: Best Practices [demo_005.cpp]](#avoiding-data-race-best-practices)
+- [6. Deadlock Prevention [demo_006.cpp]](#deadlock-prevention)
 
-# Thread implementation
+
+---
+
+# 1. Thread implementation [demo_001.cpp]
 
 ## Overview
 
@@ -67,11 +75,8 @@ This example is ideal for understanding:
 - The importance of exception-safe thread management
 - The concept of concurrent execution and race conditions
 
-</details>
 
-<details>
 
-<summary>2. Sending Functors into Threads [demo_002.cpp]</summary>
 
 # Sending Functors into Threads
 
@@ -210,11 +215,8 @@ This example teaches:
 - POSIX threads library (linked with `-pthread`)
 - Compiler: GCC, Clang, or MSVC with C++11 support
 
-</details>
 
-<details>
 
-<summary>3. Thread Creation Methods [demo_003.cpp]</summary>
 
 # Thread Creation Methods
 
@@ -435,10 +437,7 @@ This example teaches:
 - POSIX threads library (linked with `-pthread`)
 - Compiler: GCC, Clang, or MSVC with C++11 support
 
-</details>
 
-<details>
-<summary>4. Shared Resources Protection [demo_4.cpp] </summary>
 
 # Mutex and Thread Synchronization
 
@@ -746,10 +745,7 @@ This program teaches:
 
 
 
-</details>
 
-<details> 
-<summary>5. Avoiding Data Race: Best Practices [demo_005.cpp] </summary>
 
 # Avoiding Data Race: Best Practices
 
@@ -920,7 +916,7 @@ Perfect! No race condition.
 
 ### Compilation
 ```bash
-g++ -std=c++11 -pthread main.cpp -o data_race_demo
+g++ -std=c++11 -pthread demo_006.cpp -o data_race_demo
 ```
 
 ### Execution
@@ -1158,4 +1154,634 @@ Data races are one of the most challenging bugs to find and fix. By following th
 
 These principles are not optional—they are essential for correct multithreaded programming.
 
-</details>
+
+# Deadlock Prevention
+
+## Overview
+
+This program demonstrates the **deadlock problem** in multithreaded programming and provides three different solutions. Deadlock is one of the most serious bugs in concurrent programming because it causes programs to hang indefinitely, requiring manual termination.
+
+## What is Deadlock?
+
+**Deadlock** occurs when two or more threads are waiting for each other to release resources, creating a circular dependency where no thread can proceed.
+
+### Classic Deadlock Scenario
+
+```
+Thread A:                    Thread B:
+1. Locks mutex1              1. Locks mutex2
+2. Tries to lock mutex2 →    2. Tries to lock mutex1 →
+   (WAITS forever)              (WAITS forever)
+```
+
+Both threads are stuck waiting for resources held by the other. The program **hangs** and never recovers without manual intervention (Ctrl+C).
+
+### Real-World Analogy
+
+Two people need two tools:
+- **Person A** picks up a hammer and needs a screwdriver
+- **Person B** picks up a screwdriver and needs a hammer
+- Both wait forever for the other to release their tool
+
+---
+
+## The Four Conditions for Deadlock
+
+Deadlock requires **all four** of these conditions (Coffman conditions):
+
+1. **Mutual Exclusion**: Resources can only be held by one thread at a time
+2. **Hold and Wait**: Threads hold resources while waiting for others
+3. **No Preemption**: Resources can't be forcibly taken from threads
+4. **Circular Wait**: Threads form a cycle of waiting (A waits for B, B waits for A)
+
+**To prevent deadlock, break ANY ONE of these conditions.**
+
+---
+
+## Code Structure
+
+The program demonstrates four logger implementations:
+
+| Class | Description | Deadlock Risk |
+|-------|-------------|---------------|
+| `Logger1` | Inconsistent lock ordering | ❌ **WILL DEADLOCK** |
+| `Logger2` | Consistent lock ordering | ✅ Safe |
+| `Logger3` | Using `std::lock()` | ✅ Safe |
+| `Logger4` | Buggy scoped locking | ⚠️ Undefined behavior |
+
+---
+
+## Examples
+
+### ❌ Logger1: Deadlock Scenario
+
+```cpp
+class Logger1 {
+    std::mutex mtx;
+    std::mutex mtx2;
+    
+public:
+    void log(std::string s) {
+        std::lock_guard<std::mutex> lock(mtx);   // Lock mtx FIRST
+        std::lock_guard<std::mutex> lock2(mtx2); // Lock mtx2 SECOND
+        std::cout << s << std::endl;
+    }
+    
+    void log2(std::string s) {
+        std::lock_guard<std::mutex> lock2(mtx2); // Lock mtx2 FIRST
+        std::lock_guard<std::mutex> lock(mtx);   // Lock mtx SECOND
+        std::cout << s << std::endl;
+    }
+};
+```
+
+**Why it deadlocks:**
+
+```
+Time  Thread A (calls log())     Thread B (calls log2())
+-----------------------------------------------------------
+T1    Acquires mtx               Acquires mtx2
+T2    Tries to acquire mtx2 →    Tries to acquire mtx →
+      WAITS (mtx2 held by B)     WAITS (mtx held by A)
+T3    ⏳ DEADLOCK ⏳             ⏳ DEADLOCK ⏳
+```
+
+**Circular wait**: A waits for B's mtx2, B waits for A's mtx.
+
+### ✅ Logger2: Consistent Lock Ordering
+
+```cpp
+class Logger2 {
+    std::mutex mtx;
+    std::mutex mtx2;
+    
+public:
+    void log(std::string s) {
+        std::lock_guard<std::mutex> lock(mtx);   // mtx FIRST
+        std::lock_guard<std::mutex> lock2(mtx2); // mtx2 SECOND
+        std::cout << s << std::endl;
+    }
+    
+    void log2(std::string s) {
+        std::lock_guard<std::mutex> lock(mtx);   // mtx FIRST (same order!)
+        std::lock_guard<std::mutex> lock2(mtx2); // mtx2 SECOND (same order!)
+        std::cout << s << std::endl;
+    }
+};
+```
+
+**Why it works:**
+
+Both methods lock mutexes in the **same order** (mtx → mtx2). This breaks the **circular wait** condition.
+
+```
+Time  Thread A                   Thread B
+-----------------------------------------------------------
+T1    Acquires mtx               Tries to acquire mtx → WAITS
+T2    Acquires mtx2              Still waiting...
+T3    Does work, releases both   Now acquires mtx
+T4    Done                       Acquires mtx2, does work
+```
+
+No circular dependency → no deadlock.
+
+### ✅ Logger3: Using std::lock()
+
+```cpp
+class Logger3 {
+    std::mutex mtx;
+    std::mutex mtx2;
+    
+public:
+    void log(std::string s) {
+        std::lock(mtx, mtx2);  // Locks BOTH atomically
+        std::lock_guard<std::mutex> lock(mtx, std::adopt_lock);
+        std::lock_guard<std::mutex> lock2(mtx2, std::adopt_lock);
+        std::cout << s << std::endl;
+    }
+    
+    void log2(std::string s) {
+        std::lock(mtx, mtx2);  // Locks BOTH atomically (order doesn't matter)
+        std::lock_guard<std::mutex> lock2(mtx2, std::adopt_lock);
+        std::lock_guard<std::mutex> lock(mtx, std::adopt_lock);
+        std::cout << s << std::endl;
+    }
+};
+```
+
+**Why it works:**
+
+`std::lock()` uses a **deadlock-avoidance algorithm** to lock multiple mutexes atomically. It locks all mutexes or none at all.
+
+**How std::lock() works:**
+1. Try to lock all mutexes
+2. If any lock fails, release all already-acquired locks
+3. Retry with a different strategy
+4. Guarantees deadlock-free acquisition
+
+**Key points:**
+- Order of mutexes in `std::lock()` doesn't matter
+- `std::adopt_lock` tells `lock_guard` that the mutex is already locked
+- `lock_guard` only manages the unlocking (RAII)
+
+### ⚠️ Logger4: Buggy Implementation
+
+```cpp
+void log2(std::string s) {
+    {
+        std::lock_guard<std::mutex> lock2(mtx2, std::adopt_lock);
+        // BUG: mtx2 was never locked before this!
+    }
+    {
+        std::lock_guard<std::mutex> lock(mtx, std::adopt_lock);
+        // BUG: mtx was never locked before this!
+    }
+    std::cout << s << std::endl;
+}
+```
+
+**Problem:**
+
+`std::adopt_lock` tells `lock_guard` "the mutex is already locked, just manage unlocking it." But these mutexes were **never locked** in the first place!
+
+**Result:** Undefined behavior - trying to unlock mutexes that aren't locked.
+
+**Correct usage:**
+```cpp
+std::lock(mtx, mtx2);  // Actually lock them first
+std::lock_guard<std::mutex> lock(mtx, std::adopt_lock);   // Now adopt is OK
+std::lock_guard<std::mutex> lock2(mtx2, std::adopt_lock); // Now adopt is OK
+```
+
+---
+
+## Prevention Techniques
+
+### Technique 1: Use One Mutex (Best)
+
+```cpp
+class SimpleLogger {
+    std::mutex mtx;  // Only one mutex
+    std::ofstream f;
+public:
+    void log(std::string s) {
+        std::lock_guard<std::mutex> lock(mtx);
+        f << s << std::endl;
+    }
+};
+```
+
+**Advantage:** Can't deadlock with only one mutex!
+
+### Technique 2: Consistent Lock Ordering
+
+```cpp
+// Always lock in the same order across all functions
+void func1() {
+    std::lock_guard<std::mutex> lock1(mtx1);  // mtx1 first
+    std::lock_guard<std::mutex> lock2(mtx2);  // mtx2 second
+}
+
+void func2() {
+    std::lock_guard<std::mutex> lock1(mtx1);  // mtx1 first (same order!)
+    std::lock_guard<std::mutex> lock2(mtx2);  // mtx2 second (same order!)
+}
+```
+
+**Rule:** Establish a global ordering of mutexes and always follow it.
+
+### Technique 3: Use std::lock()
+
+```cpp
+// For locking multiple mutexes
+std::lock(mtx1, mtx2, mtx3);  // Locks all atomically
+std::lock_guard<std::mutex> lock1(mtx1, std::adopt_lock);
+std::lock_guard<std::mutex> lock2(mtx2, std::adopt_lock);
+std::lock_guard<std::mutex> lock3(mtx3, std::adopt_lock);
+```
+
+**Advantage:** Order doesn't matter - deadlock-free algorithm.
+
+### Technique 4: Use std::scoped_lock (C++17)
+
+```cpp
+// C++17: Combines std::lock() and lock_guard
+std::scoped_lock lock(mtx1, mtx2, mtx3);  // One line, deadlock-free!
+```
+
+**Advantage:** Simplest and most modern approach.
+
+### Technique 5: Minimize Lock Scope
+
+```cpp
+// ❌ Bad: Locks held too long
+std::lock_guard<std::mutex> lock1(mtx1);
+std::lock_guard<std::mutex> lock2(mtx2);
+expensive_operation();  // Holding both locks during expensive work
+
+// ✅ Good: Lock, work, unlock
+{
+    std::lock_guard<std::mutex> lock1(mtx1);
+    quick_operation1();
+}
+{
+    std::lock_guard<std::mutex> lock2(mtx2);
+    quick_operation2();
+}
+expensive_operation();  // No locks held
+```
+
+---
+
+## Demonstrations
+
+### Demo 1: Deadlock (Will Hang!)
+
+**What happens:**
+```bash
+$ ./deadlock_demo
+=== DEMO 1: Deadlock Scenario (WILL HANG!) ===
+Thread A calls log()  -> locks mtx, waits for mtx2
+Thread B calls log2() -> locks mtx2, waits for mtx
+Result: DEADLOCK - both threads wait forever
+Press Ctrl+C to terminate if it hangs...
+[Program hangs here - use Ctrl+C to exit]
+```
+
+**Why:** Main thread calls `log2()` (locks mtx2→mtx), spawned thread calls `log()` (locks mtx→mtx2). Opposite orders create deadlock.
+
+### Demo 2: Consistent Ordering (Safe)
+
+**What happens:**
+```bash
+$ ./deadlock_demo
+=== DEMO 2: Consistent Lock Ordering ===
+Both threads lock mutexes in the same order
+Result: NO DEADLOCK
+T1 ---
+--- main
+T1 ---
+--- main
+[...continues until completion...]
+Demo 2 completed successfully!
+```
+
+**Why:** Both threads lock in the same order (mtx→mtx2), preventing circular wait.
+
+### Demo 3: Using std::lock() (Safe)
+
+**What happens:**
+```bash
+$ ./deadlock_demo
+=== DEMO 3: Using std::lock() ===
+std::lock() locks multiple mutexes atomically
+Lock order in code doesn't matter
+Result: NO DEADLOCK
+T1 ---
+--- main
+T1 ---
+[...continues until completion...]
+Demo 3 completed successfully!
+```
+
+**Why:** `std::lock()` uses a deadlock-avoidance algorithm.
+
+### Demo 4: Buggy Implementation
+
+**What happens:**
+```bash
+$ ./deadlock_demo
+=== DEMO 4: Buggy Scoped Locking ===
+WARNING: log2() has bugs with std::adopt_lock
+This example shows what NOT to do
+[May crash or exhibit undefined behavior]
+```
+
+**Why:** Uses `std::adopt_lock` without actually locking first - undefined behavior.
+
+---
+
+## Building and Running
+
+### Compilation
+
+```bash
+g++ -std=c++11 -pthread deadlock_demo.cpp -o deadlock_demo
+```
+
+### Running
+
+```bash
+./deadlock_demo
+```
+
+### Testing Specific Demos
+
+Edit `main()` to uncomment the demo you want:
+
+```cpp
+int main() {
+    // demo1();  // WARNING: Will hang!
+    demo2();     // Safe
+    // demo3();  // Safe
+    // demo4();  // Buggy
+    return 0;
+}
+```
+
+**Important:** Run `demo1()` in a terminal where you can easily press Ctrl+C to terminate!
+
+---
+
+## Best Practices
+
+### ✅ Do These Things
+
+#### 1. Use One Mutex When Possible
+```cpp
+class Safe {
+    std::mutex mtx;  // Single mutex
+    // All data protected by one mutex
+};
+```
+
+#### 2. Establish Lock Ordering
+```cpp
+// Rule: Always lock A before B
+void anyFunction() {
+    std::lock_guard<std::mutex> lockA(mutexA);
+    std::lock_guard<std::mutex> lockB(mutexB);
+}
+```
+
+#### 3. Use std::lock() for Multiple Locks
+```cpp
+std::lock(m1, m2, m3);
+std::lock_guard<std::mutex> lock1(m1, std::adopt_lock);
+std::lock_guard<std::mutex> lock2(m2, std::adopt_lock);
+std::lock_guard<std::mutex> lock3(m3, std::adopt_lock);
+```
+
+#### 4. Use std::scoped_lock (C++17)
+```cpp
+std::scoped_lock lock(m1, m2, m3);  // Simplest!
+```
+
+#### 5. Document Lock Ordering
+```cpp
+// LOCK ORDER: accountMutex -> transactionMutex -> logMutex
+// ALL functions must follow this order
+```
+
+#### 6. Minimize Lock Duration
+```cpp
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    // Only critical section here
+}  // Release early
+// Non-critical work here
+```
+
+### ❌ Don't Do These Things
+
+#### 1. Never Lock in Inconsistent Order
+```cpp
+// ❌ Bad: Different orders
+void func1() { lock(A); lock(B); }
+void func2() { lock(B); lock(A); }  // DEADLOCK RISK!
+```
+
+#### 2. Never Call External Functions While Holding Locks
+```cpp
+// ❌ Bad: Calls unknown code with lock held
+std::lock_guard<std::mutex> lock(mtx);
+userCallback();  // What if this tries to lock mtx?
+```
+
+#### 3. Never Use std::adopt_lock Without Locking First
+```cpp
+// ❌ Bad: adopt_lock without actual lock
+std::lock_guard<std::mutex> lock(mtx, std::adopt_lock);  // UB!
+
+// ✅ Good: Lock first, then adopt
+mtx.lock();
+std::lock_guard<std::mutex> lock(mtx, std::adopt_lock);  // OK
+```
+
+#### 4. Avoid Nested Locks When Possible
+```cpp
+// ❌ Risky: Nested locks
+void outer() {
+    std::lock_guard<std::mutex> lock(mtx);
+    inner();  // What if inner() also locks?
+}
+```
+
+---
+
+## Lock Granularity
+
+### Fine-Grained Locking
+
+**Multiple mutexes protecting small pieces of data**
+
+```cpp
+class FineGrained {
+    std::mutex mtx1;
+    int data1;
+    
+    std::mutex mtx2;
+    int data2;
+    
+public:
+    void updateData1() { std::lock_guard<std::mutex> lock(mtx1); data1++; }
+    void updateData2() { std::lock_guard<std::mutex> lock(mtx2); data2++; }
+};
+```
+
+**Advantages:**
+- ✅ Better parallelism (threads can work on different data simultaneously)
+- ✅ Less contention
+
+**Disadvantages:**
+- ❌ More complex code
+- ❌ Higher deadlock risk
+- ❌ Harder to maintain
+
+### Coarse-Grained Locking
+
+**One mutex protecting all data**
+
+```cpp
+class CoarseGrained {
+    std::mutex mtx;
+    int data1;
+    int data2;
+    
+public:
+    void updateData1() { std::lock_guard<std::mutex> lock(mtx); data1++; }
+    void updateData2() { std::lock_guard<std::mutex> lock(mtx); data2++; }
+};
+```
+
+**Advantages:**
+- ✅ Simpler code
+- ✅ Lower deadlock risk
+- ✅ Easier to maintain
+
+**Disadvantages:**
+- ❌ Less parallelism
+- ❌ More contention
+
+### Recommendation
+
+**Start coarse, optimize if needed:**
+1. Begin with **one mutex** per class (coarse-grained)
+2. Profile your application
+3. Only move to fine-grained if you find a bottleneck
+4. "Premature optimization is the root of all evil" - Donald Knuth
+
+---
+
+## Common Patterns
+
+### Pattern 1: std::lock() with RAII
+
+```cpp
+void transferMoney(Account& from, Account& to, int amount) {
+    // Lock both account mutexes atomically
+    std::lock(from.mutex, to.mutex);
+    
+    // Adopt the locks (already locked by std::lock)
+    std::lock_guard<std::mutex> lock1(from.mutex, std::adopt_lock);
+    std::lock_guard<std::mutex> lock2(to.mutex, std::adopt_lock);
+    
+    from.balance -= amount;
+    to.balance += amount;
+    
+    // Locks released automatically
+}
+```
+
+### Pattern 2: std::scoped_lock (C++17)
+
+```cpp
+void transferMoney(Account& from, Account& to, int amount) {
+    // One line - locks both, deadlock-free
+    std::scoped_lock lock(from.mutex, to.mutex);
+    
+    from.balance -= amount;
+    to.balance += amount;
+}
+```
+
+### Pattern 3: Lock Hierarchies
+
+```cpp
+class HierarchicalMutex {
+    std::mutex mtx;
+    unsigned long hierarchy_level;
+    
+public:
+    void lock() {
+        check_hierarchy();  // Verify correct order
+        mtx.lock();
+    }
+};
+```
+
+### Pattern 4: Try-Lock with Backoff
+
+```cpp
+bool tryTransfer(Account& from, Account& to, int amount) {
+    std::unique_lock<std::mutex> lock1(from.mutex, std::defer_lock);
+    std::unique_lock<std::mutex> lock2(to.mutex, std::defer_lock);
+    
+    // Try to lock both
+    if (std::try_lock(lock1, lock2) == -1) {
+        // Success: both locked
+        from.balance -= amount;
+        to.balance += amount;
+        return true;
+    }
+    return false;  // Failed, try again later
+}
+```
+
+---
+
+## Debugging Deadlocks
+
+### Detection Techniques
+
+#### 1. Thread Dump (Linux/Mac)
+```bash
+# While program is hung:
+kill -QUIT <pid>  # Sends SIGQUIT, prints thread states
+```
+
+#### 2. GDB Debugger
+```bash
+gdb ./program
+(gdb) run
+# Wait for deadlock
+^C  # Ctrl+C to break
+(gdb) info threads
+(gdb) thread <n>
+(gdb) bt  # Backtrace to see where each thread is stuck
+```
+
+#### 3. Valgrind Helgrind
+```bash
+valgrind --tool=helgrind ./program
+# Detects potential deadlocks and lock ordering issues
+```
+
+#### 4. ThreadSanitizer (TSan)
+```bash
+g++ -fsanitize=thread -g deadlock_demo.cpp -o deadlock_demo
+./deadlock_demo
+# Reports data races and potential deadlocks
+```
+
+###
