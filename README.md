@@ -2,14 +2,13 @@
 
 ## Table of Contents
 
-- [1. Thread implementation [demo_001.cpp]](#thread-implementation)
-- [2. Sending Functors into Threads [demo_002.cpp]](#sending-functors-into-threads)
-- [3. Thread Creation Methods [demo_003.cpp]](#thread-creation-methods)
-- [4. Mutex and Thread Synchronization [demo_4.cpp]](#mutex-and-thread-synchronization)
-- [5. Avoiding Data Race: Best Practices [demo_005.cpp]](#avoiding-data-race-best-practices)
-- [6. Deadlock Prevention [demo_006.cpp]](#deadlock-prevention)
-
-
+- [1. Thread implementation [demo_001.cpp]](#1-thread-implementation-demo_001cpp)
+- [2. Sending Functors into Threads [demo_002.cpp]](#2-sending-functors-into-threads-demo_002cpp)
+- [3. Thread Creation Methods [demo_003.cpp]](#3-thread-creation-methods-demo_003cpp)
+- [4. Mutex and Thread Synchronization [demo_4.cpp]](#4-mutex-and-thread-synchronization-demo_4cpp)
+- [5. Avoiding Data Race: Best Practices [demo_005.cpp]](#5-avoiding-data-race-best-practices-demo_005cpp)
+- [6. Deadlock Prevention [demo_006.cpp]](#6-deadlock-prevention-demo_006cpp)
+- [7. Shared Mutex (Reader-Writer Lock) [demo_007.cpp]](#7-shared-mutex-reader-writer-lock-demo_007cpp)
 ---
 
 # 1. Thread implementation [demo_001.cpp]
@@ -78,7 +77,7 @@ This example is ideal for understanding:
 
 
 
-# Sending Functors into Threads
+# 2. Sending Functors into Threads [demo_002.cpp]
 
 ## Overview
 
@@ -218,7 +217,7 @@ This example teaches:
 
 
 
-# Thread Creation Methods
+# 3. Thread Creation Methods [demo_003.cpp]
 
 ## Overview
 
@@ -439,7 +438,7 @@ This example teaches:
 
 
 
-# Mutex and Thread Synchronization
+# 4. Mutex and Thread Synchronization [demo_4.cpp]
 
 ## Overview
 
@@ -560,7 +559,7 @@ When a mutex is locked but never unlocked, causing all threads waiting for it to
 
 ### Compilation
 ```bash
-g++ -std=c++11 -pthread demo_04.cpp -o mutex_demo
+g++ -std=c++11 -pthread demo_004.cpp -o mutex_demo
 ```
 
 ### Execution
@@ -747,7 +746,7 @@ This program teaches:
 
 
 
-# Avoiding Data Race: Best Practices
+# 5. Avoiding Data Race: Best Practices [demo_005.cpp]
 
 ## Overview
 
@@ -916,7 +915,7 @@ Perfect! No race condition.
 
 ### Compilation
 ```bash
-g++ -std=c++11 -pthread demo_006.cpp -o data_race_demo
+g++ -std=c++11 -pthread demo_005.cpp -o data_race_demo
 ```
 
 ### Execution
@@ -1155,7 +1154,7 @@ Data races are one of the most challenging bugs to find and fix. By following th
 These principles are not optional—they are essential for correct multithreaded programming.
 
 
-# Deadlock Prevention
+# 6. Deadlock Prevention [demo_006.cpp]
 
 ## Overview
 
@@ -1506,7 +1505,7 @@ This example shows what NOT to do
 ### Compilation
 
 ```bash
-g++ -std=c++11 -pthread deadlock_demo.cpp -o deadlock_demo
+g++ -std=c++11 -pthread demo_006.cpp -o deadlock_demo
 ```
 
 ### Running
@@ -1779,9 +1778,829 @@ valgrind --tool=helgrind ./program
 
 #### 4. ThreadSanitizer (TSan)
 ```bash
-g++ -fsanitize=thread -g deadlock_demo.cpp -o deadlock_demo
+g++ -fsanitize=thread -g demo_006.cpp -o deadlock_demo
 ./deadlock_demo
 # Reports data races and potential deadlocks
 ```
 
-###
+# 7. Shared Mutex (Reader-Writer Lock) [demo_007.cpp]
+
+## Overview
+
+This lesson demonstrates **shared_mutex** (also known as a **reader-writer lock**), a powerful synchronization primitive introduced in C++17 that allows multiple threads to read data concurrently while ensuring exclusive access for writes.
+
+## Table of Contents
+
+- [What is a Shared Mutex?](#what-is-a-shared-mutex)
+- [The Problem This Code Has](#the-problem-this-code-has)
+- [Lock Types Explained](#lock-types-explained)
+- [How Shared Mutex Works](#how-shared-mutex-works)
+- [Performance Comparison](#performance-comparison)
+- [Building and Running](#building-and-running)
+- [Expected Output](#expected-output)
+- [Corrected Implementation](#corrected-implementation)
+- [When to Use Shared Mutex](#when-to-use-shared-mutex)
+- [Best Practices](#best-practices)
+- [Common Use Cases](#common-use-cases)
+- [Complete Example](#complete-example)
+
+---
+
+## What is a Shared Mutex?
+
+A **shared_mutex** (C++17) allows two types of locks:
+
+### 1. Shared Lock (Read Lock) 🔓
+- **Multiple threads** can hold this lock simultaneously
+- Used for read-only operations
+- Created with `std::shared_lock<std::shared_mutex>`
+
+### 2. Exclusive Lock (Write Lock) 🔒
+- **Only ONE thread** can hold this lock at a time
+- Blocks all other readers and writers
+- Created with `std::lock_guard<std::shared_mutex>` or `std::unique_lock<std::shared_mutex>`
+
+### Visual Representation
+
+```
+Regular Mutex (std::mutex):
+T1: [LOCK]----work----[UNLOCK]
+T2:           [WAIT]----[LOCK]----work----[UNLOCK]
+T3:                          [WAIT]----[LOCK]----work----[UNLOCK]
+Result: All threads serialize (slow)
+
+Shared Mutex (std::shared_mutex):
+           READERS                    WRITER           READERS
+T1: [READ LOCK]--read--[UNLOCK]
+T2: [READ LOCK]--read--[UNLOCK]
+T3: [READ LOCK]--read--[UNLOCK]     [WAIT]
+T4:                              [EXCLUSIVE]--write--[UNLOCK]
+T5:                                                        [READ LOCK]--read
+T6:                                                        [READ LOCK]--read
+Result: Multiple concurrent readers, exclusive writers (fast!)
+```
+
+---
+
+## The Problem This Code Has
+
+### ⚠️ Critical Bug in Original Code
+
+The original code has a **serious bug** that defeats the entire purpose of using `shared_mutex`:
+
+```cpp
+void read(int i) {
+    lock_guard<shared_mutex> sl(sh_mutex);  // ❌ WRONG!
+    cout << "Read thread " << i << " with shared lock" << endl;
+}
+```
+
+**Problem:** Uses `lock_guard` which creates an **EXCLUSIVE** lock, not a shared lock!
+
+**Result:**
+- Only ONE reader can execute at a time
+- Readers wait for each other unnecessarily
+- No performance benefit over regular mutex
+- Defeats the entire purpose of shared_mutex!
+
+### ✅ Corrected Version
+
+```cpp
+void read(int i) {
+    shared_lock<shared_mutex> sl(sh_mutex);  // ✅ CORRECT!
+    cout << "Read thread " << i << " with shared lock" << endl;
+}
+```
+
+**Result:**
+- Multiple readers can execute simultaneously
+- Massive performance improvement for read-heavy workloads
+- Proper use of shared_mutex!
+
+---
+
+## Lock Types Explained
+
+### Comparison Table
+
+| Lock Type | Mutex Type | Access Mode | Concurrent Access | Use Case |
+|-----------|------------|-------------|-------------------|----------|
+| `lock_guard<shared_mutex>` | shared_mutex | Exclusive | NO (1 thread only) | **WRITE** operations |
+| `unique_lock<shared_mutex>` | shared_mutex | Exclusive | NO (1 thread only) | **WRITE** operations (flexible) |
+| `shared_lock<shared_mutex>` | shared_mutex | Shared | YES (multiple threads) | **READ** operations |
+| `lock_guard<mutex>` | mutex | Exclusive | NO (1 thread only) | General synchronization |
+
+### Lock Behavior Matrix
+
+| Current Lock State | Can Acquire Shared Lock? | Can Acquire Exclusive Lock? |
+|-------------------|-------------------------|----------------------------|
+| **Unlocked** | ✅ Yes | ✅ Yes |
+| **Shared Lock(s)** | ✅ Yes (multiple) | ❌ No (must wait) |
+| **Exclusive Lock** | ❌ No (must wait) | ❌ No (must wait) |
+
+---
+
+## How Shared Mutex Works
+
+### Example Timeline
+
+```
+Time  Thread Operation           Lock State           Who Can Proceed?
+--------------------------------------------------------------------------------
+T0    (idle)                     UNLOCKED            Anyone
+T1    Reader1 acquires shared    SHARED(1)           Other readers
+T2    Reader2 acquires shared    SHARED(2)           Other readers
+T3    Reader3 acquires shared    SHARED(3)           Other readers
+T4    Writer1 tries exclusive    SHARED(3), W:WAIT   Nobody (writer waits)
+T5    Reader1 releases           SHARED(2), W:WAIT   Other readers
+T6    Reader2 releases           SHARED(1), W:WAIT   Other readers
+T7    Reader3 releases           UNLOCKED, W:WAIT    Writer proceeds
+T8    Writer1 acquires exclusive EXCLUSIVE(W1)       Nobody
+T9    Reader4 tries shared       EXCLUSIVE, R:WAIT   Nobody (reader waits)
+T10   Writer1 releases           UNLOCKED, R:WAIT    Reader proceeds
+T11   Reader4 acquires shared    SHARED(1)           Other readers
+```
+
+### Key Points
+
+1. **Multiple readers** can hold shared locks simultaneously
+2. **Writers block everyone** (exclusive access)
+3. **New readers cannot join** while a writer is waiting (prevents writer starvation)
+4. **Lock upgrades are not allowed** (shared → exclusive requires unlock → lock)
+
+---
+
+## Performance Comparison
+
+### Scenario: 100 reads, 2 writes
+
+#### With Exclusive Locks Only (Wrong - Original Code)
+
+```cpp
+void read(int i) {
+    lock_guard<shared_mutex> lock(sh_mutex);  // Exclusive!
+    // work
+}
+```
+
+**Execution:**
+```
+R R R R R W W R R R ... (all serialized)
+├─┼─┼─┼─┼─┼─┼─┼─┼─┤
+Total time = 102 operations × time_per_operation
+```
+
+**Performance:** Sequential, slow
+
+#### With Shared Locks (Correct)
+
+```cpp
+void read(int i) {
+    shared_lock<shared_mutex> lock(sh_mutex);  // Shared!
+    // work
+}
+```
+
+**Execution:**
+```
+RRRRR...  W  W  RRRRR... (readers parallel)
+└────┤    ├  ├  └────┤
+Parallel  Seq Seq Parallel
+
+Total time ≈ read_time + (2 × write_time)
+```
+
+**Performance:** Massively parallel, fast
+
+### Speedup Calculation
+
+```
+Speedup = (Sequential Time) / (Parallel Time)
+        = (100 × 10ms + 2 × 100ms) / (10ms + 2 × 100ms)
+        = 1200ms / 210ms
+        = 5.7x faster!
+```
+
+For **1000 reads and 2 writes**, speedup approaches **10x or more**!
+
+---
+
+## Building and Running
+
+### Prerequisites
+
+- C++17 or later (for `std::shared_mutex`)
+- Compiler: GCC 7+, Clang 5+, or MSVC 2017+
+
+### Compilation
+
+```bash
+# GCC/Clang
+g++ -std=c++17 -pthread demo_007.cpp -o shared_mutex_demo
+
+# With optimizations
+g++ -std=c++17 -pthread -O2 demo_007.cpp -o shared_mutex_demo
+```
+
+### Execution
+
+```bash
+./shared_mutex_demo
+```
+
+---
+
+## Expected Output
+
+### Original Version (Buggy)
+
+```
+=== ORIGINAL VERSION (Bug: readers use exclusive lock) ===
+Watch: Readers will wait for each other (BAD!)
+Expected behavior: All operations serialize (slow)
+
+Read thread 0 with shared lock
+Read thread 1 with shared lock
+Read thread 2 with shared lock
+Read thread 3 with shared lock
+Read thread 4 with shared lock
+print thread 5 with exclusive lock
+(2 second pause)
+print thread 6 with exclusive lock
+(2 second pause)
+Read thread 7 with shared lock
+Read thread 8 with shared lock
+... (all serialize, one at a time)
+```
+
+**Problem:** Notice how readers execute one at a time, not concurrently.
+
+### Corrected Version
+
+```
+=== CORRECTED VERSION (Readers use shared lock) ===
+Watch: Multiple readers execute concurrently (GOOD!)
+Expected behavior: Readers run in parallel, writers get exclusive access
+
+READER thread 0 - shared access
+READER thread 1 - shared access
+READER thread 2 - shared access
+READER thread 3 - shared access
+READER thread 4 - shared access
+(All 5 readers execute together!)
+READER thread 0 - finished reading
+READER thread 1 - finished reading
+READER thread 2 - finished reading
+READER thread 3 - finished reading
+READER thread 4 - finished reading
+WRITER thread 5 - exclusive access
+(500ms pause - exclusive access)
+WRITER thread 5 - finished writing
+WRITER thread 6 - exclusive access
+(500ms pause - exclusive access)
+WRITER thread 6 - finished writing
+READER thread 7 - shared access
+READER thread 8 - shared access
+... (multiple readers again!)
+```
+
+**Benefit:** Readers execute concurrently, completing much faster!
+
+---
+
+## Corrected Implementation
+
+### Complete Thread-Safe Class Example
+
+```cpp
+#include <shared_mutex>
+#include <map>
+#include <string>
+
+class ThreadSafeCache {
+private:
+    mutable std::shared_mutex mutex_;
+    std::map<std::string, int> cache_;
+    
+public:
+    // READ operation - uses SHARED lock
+    int get(const std::string& key) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        
+        auto it = cache_.find(key);
+        if (it != cache_.end()) {
+            return it->second;
+        }
+        return -1;  // Not found
+    }
+    
+    // READ operation - multiple readers can call this
+    bool contains(const std::string& key) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return cache_.find(key) != cache_.end();
+    }
+    
+    // WRITE operation - uses EXCLUSIVE lock
+    void set(const std::string& key, int value) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        cache_[key] = value;
+    }
+    
+    // WRITE operation - exclusive access
+    void clear() {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        cache_.clear();
+    }
+    
+    // READ operation - returns copy
+    size_t size() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return cache_.size();
+    }
+};
+```
+
+### Usage Example
+
+```cpp
+ThreadSafeCache cache;
+
+// Multiple reader threads (can run concurrently)
+auto reader = [&cache](int id) {
+    for (int i = 0; i < 1000; ++i) {
+        int value = cache.get("key" + std::to_string(i % 10));
+        // Process value...
+    }
+};
+
+// Writer thread (exclusive access)
+auto writer = [&cache](int id) {
+    for (int i = 0; i < 100; ++i) {
+        cache.set("key" + std::to_string(i), i * 10);
+    }
+};
+
+// Launch threads
+std::vector<std::thread> threads;
+for (int i = 0; i < 10; ++i) {
+    threads.push_back(std::thread(reader, i));  // 10 readers
+}
+threads.push_back(std::thread(writer, 0));      // 1 writer
+
+for (auto& t : threads) {
+    t.join();
+}
+```
+
+---
+
+## When to Use Shared Mutex
+
+### ✅ Use shared_mutex When:
+
+1. **Read-Heavy Workloads**
+   ```
+   Ratio: 90% reads, 10% writes or better
+   Example: Configuration cache, lookup tables
+   ```
+
+2. **Expensive Read Operations**
+   ```
+   Read operations take significant time
+   Example: Parsing cached data, complex calculations
+   ```
+
+3. **High Contention on Reads**
+   ```
+   Many threads need to read simultaneously
+   Example: Reference data accessed by all threads
+   ```
+
+4. **Rare Writes**
+   ```
+   Writes happen infrequently
+   Example: Config reload, cache invalidation
+   ```
+
+### ❌ Don't Use shared_mutex When:
+
+1. **Write-Heavy Workloads**
+   ```
+   Ratio: 50% writes or more
+   Use: Regular std::mutex (simpler, less overhead)
+   ```
+
+2. **Very Short Critical Sections**
+   ```
+   Operations complete in microseconds
+   Use: std::mutex or std::atomic (less overhead)
+   ```
+
+3. **Equal Read/Write Mix**
+   ```
+   Reads and writes are equally common
+   Use: Regular std::mutex
+   ```
+
+4. **Single-Threaded Reads**
+   ```
+   Only one thread reads at a time anyway
+   Use: Regular std::mutex (simpler)
+   ```
+
+### Performance Threshold
+
+```
+shared_mutex overhead ≈ 2-3x regular mutex overhead
+
+Break-even point:
+- Need at least 2-3 concurrent readers to justify overhead
+- Read/Write ratio should be at least 80/20
+- Critical section should be non-trivial (> 100 instructions)
+
+Always profile before and after!
+```
+
+---
+
+## Best Practices
+
+### ✅ Do These Things
+
+#### 1. Use Correct Lock Types
+```cpp
+// ✅ CORRECT
+void read() {
+    std::shared_lock<std::shared_mutex> lock(mtx);  // Shared
+    // read-only operations
+}
+
+void write() {
+    std::unique_lock<std::shared_mutex> lock(mtx);  // Exclusive
+    // write operations
+}
+```
+
+#### 2. Keep Critical Sections Small
+```cpp
+// ✅ GOOD: Lock only around shared data access
+void processData() {
+    Data localCopy;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx);
+        localCopy = sharedData;  // Quick copy
+    }  // Lock released here
+    
+    expensiveProcessing(localCopy);  // No lock held
+}
+```
+
+#### 3. Make Mutex Mutable for Const Methods
+```cpp
+class Cache {
+    mutable std::shared_mutex mtx_;  // mutable!
+    std::map<int, std::string> data_;
+    
+public:
+    std::string get(int key) const {  // const method
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        // Can lock because mtx_ is mutable
+        return data_.at(key);
+    }
+};
+```
+
+#### 4. Document Lock Requirements
+```cpp
+class DataStore {
+    // All methods use shared_lock for reads, unique_lock for writes
+    // Lock hierarchy: Always acquire locks in ID order if multiple stores
+    std::shared_mutex mtx_;
+    
+public:
+    // REQUIRES: No locks held
+    // LOCKS: shared_mutex (shared)
+    std::string read(int id) const;
+    
+    // REQUIRES: No locks held
+    // LOCKS: shared_mutex (exclusive)
+    void write(int id, const std::string& value);
+};
+```
+
+#### 5. Prefer shared_lock for Const Methods
+```cpp
+class ThreadSafeContainer {
+    mutable std::shared_mutex mtx_;
+    std::vector<int> data_;
+    
+public:
+    // All const methods use shared_lock
+    size_t size() const {
+        std::shared_lock lock(mtx_);
+        return data_.size();
+    }
+    
+    bool empty() const {
+        std::shared_lock lock(mtx_);
+        return data_.empty();
+    }
+    
+    // Non-const methods use unique_lock
+    void push_back(int val) {
+        std::unique_lock lock(mtx_);
+        data_.push_back(val);
+    }
+};
+```
+
+### ❌ Don't Do These Things
+
+#### 1. Don't Use Exclusive Lock for Reads
+```cpp
+// ❌ BAD: Defeats purpose of shared_mutex
+void read() {
+    std::lock_guard<std::shared_mutex> lock(mtx);  // Exclusive!
+    // read operation
+}
+```
+
+#### 2. Don't Hold Locks During I/O
+```cpp
+// ❌ BAD: Holds lock during slow I/O
+void logData() {
+    std::shared_lock<std::shared_mutex> lock(mtx);
+    std::cout << data_ << std::endl;  // Slow I/O with lock held!
+}
+
+// ✅ GOOD: Copy data, then log
+void logData() {
+    std::string copy;
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx);
+        copy = data_;
+    }
+    std::cout << copy << std::endl;  // I/O without lock
+}
+```
+
+#### 3. Don't Try to Upgrade Locks
+```cpp
+// ❌ BAD: Can't upgrade shared → exclusive
+void conditionalWrite() {
+    std::shared_lock<std::shared_mutex> read_lock(mtx);
+    if (needsUpdate(data_)) {
+        read_lock.unlock();
+        std::unique_lock<std::shared_mutex> write_lock(mtx);  // Race condition!
+        data_ = newValue;
+    }
+}
+
+// ✅ GOOD: Check, unlock, then exclusive lock
+void conditionalWrite() {
+    bool needs_update;
+    {
+        std::shared_lock lock(mtx);
+        needs_update = needsUpdate(data_);
+    }
+    if (needs_update) {
+        std::unique_lock lock(mtx);
+        // Re-check condition!
+        if (needsUpdate(data_)) {
+            data_ = newValue;
+        }
+    }
+}
+```
+
+#### 4. Don't Mix with Regular Mutex
+```cpp
+// ❌ BAD: Mixing lock types
+std::mutex regular_mtx;
+std::shared_mutex shared_mtx;
+
+void badFunction() {
+    std::lock_guard<std::mutex> lock1(regular_mtx);
+    std::shared_lock<std::shared_mutex> lock2(shared_mtx);
+    // Confusing and error-prone!
+}
+```
+
+---
+
+## Common Use Cases
+
+### 1. Configuration Cache
+
+```cpp
+class ConfigCache {
+    mutable std::shared_mutex mtx_;
+    std::map<std::string, std::string> config_;
+    
+public:
+    // Frequent: Many threads read config
+    std::string get(const std::string& key) const {
+        std::shared_lock lock(mtx_);
+        return config_.at(key);
+    }
+    
+    // Rare: Config reload
+    void reload(const std::map<std::string, std::string>& new_config) {
+        std::unique_lock lock(mtx_);
+        config_ = new_config;
+    }
+};
+```
+
+### 2. Database Query Cache
+
+```cpp
+class QueryCache {
+    mutable std::shared_mutex mtx_;
+    std::unordered_map<std::string, QueryResult> cache_;
+    
+public:
+    // Frequent: Cache lookups
+    std::optional<QueryResult> lookup(const std::string& query) const {
+        std::shared_lock lock(mtx_);
+        auto it = cache_.find(query);
+        if (it != cache_.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+    
+    // Less frequent: Cache updates
+    void insert(const std::string& query, const QueryResult& result) {
+        std::unique_lock lock(mtx_);
+        cache_[query] = result;
+    }
+    
+    // Rare: Cache invalidation
+    void invalidate() {
+        std::unique_lock lock(mtx_);
+        cache_.clear();
+    }
+};
+```
+
+### 3. Thread-Safe Lookup Table
+
+```cpp
+class SymbolTable {
+    mutable std::shared_mutex mtx_;
+    std::map<std::string, int> symbols_;
+    
+public:
+    // Frequent: Symbol lookups
+    int lookup(const std::string& name) const {
+        std::shared_lock lock(mtx_);
+        return symbols_.at(name);
+    }
+    
+    // Less frequent: Symbol definition
+    void define(const std::string& name, int value) {
+        std::unique_lock lock(mtx_);
+        symbols_[name] = value;
+    }
+};
+```
+
+### 4. Observer Pattern
+
+```cpp
+class Subject {
+    mutable std::shared_mutex mtx_;
+    std::vector<Observer*> observers_;
+    
+public:
+    // Frequent: Notify all observers
+    void notify() const {
+        std::shared_lock lock(mtx_);
+        for (auto* obs : observers_) {
+            obs->update();  // Readers can iterate concurrently
+        }
+    }
+    
+    // Rare: Add observer
+    void attach(Observer* obs) {
+        std::unique_lock lock(mtx_);
+        observers_.push_back(obs);
+    }
+    
+    // Rare: Remove observer
+    void detach(Observer* obs) {
+        std::unique_lock lock(mtx_);
+        observers_.erase(std::remove(observers_.begin(), 
+                                     observers_.end(), obs), 
+                        observers_.end());
+    }
+};
+```
+
+---
+
+## Complete Example
+
+Here's a complete, production-ready example:
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <shared_mutex>
+#include <vector>
+#include <map>
+#include <chrono>
+#include <random>
+
+class ThreadSafeDictionary {
+private:
+    mutable std::shared_mutex mtx_;
+    std::map<std::string, int> data_;
+    
+public:
+    // READ operation
+    int get(const std::string& key) const {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        auto it = data_.find(key);
+        return (it != data_.end()) ? it->second : -1;
+    }
+    
+    // WRITE operation
+    void set(const std::string& key, int value) {
+        std::unique_lock<std::shared_mutex> lock(mtx_);
+        data_[key] = value;
+    }
+    
+    // READ operation
+    size_t size() const {
+        std::shared_lock<std::shared_mutex> lock(mtx_);
+        return data_.size();
+    }
+};
+
+int main() {
+    ThreadSafeDictionary dict;
+    std::vector<std::thread> threads;
+    
+    // Create 10 reader threads
+    for (int i = 0; i < 10; ++i) {
+        threads.emplace_back([&dict, i]() {
+            for (int j = 0; j < 100; ++j) {
+                int value = dict.get("key" + std::to_string(j % 10));
+                // Simulate work
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            std::cout << "Reader " << i << " completed\n";
+        });
+    }
+    
+    // Create 2 writer threads
+    for (int i = 0; i < 2; ++i) {
+        threads.emplace_back([&dict, i]() {
+            for (int j = 0; j < 10; ++j) {
+                dict.set("key" + std::to_string(j), j * 100);
+                // Simulate work
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            std::cout << "Writer " << i << " completed\n";
+        });
+    }
+    
+    // Wait for all threads
+    for (auto& t : threads) {
+        t.join();
+    }
+    
+    std::cout << "Final dictionary size: " << dict.size() << "\n";
+    
+    return 0;
+}
+```
+
+---
+
+## Key Takeaways
+
+1. **`shared_lock`** for reads (multiple concurrent)
+2. **`unique_lock`** or **`lock_guard`** for writes (exclusive)
+3. Use **shared_mutex** only for **read-heavy** workloads
+4. Always **profile** before and after
+5. **Encapsulate** shared_mutex with the data it protects
+6. **Document** your locking strategy
+7. Keep **critical sections small**
+
+---
+
+## Requirements
+
+- **C++17** or later for `std::shared_mutex`
+- **POSIX threads** library (`-pthread`)
+- Compiler: GCC 7+, Clang 5+, MSVC 2017+
+
+## Further Reading
+
+- [C++ Reference: std::shared_mutex](https://en.cppreference.com/w/cpp/thread/shared_mutex)
+- [C++ Reference: std::shared_lock](https://en.cppreference.com/w/cpp/thread/shared_lock)
+- Reader-Writer Problem
+- Lock-Free Programming (advanced alternative)

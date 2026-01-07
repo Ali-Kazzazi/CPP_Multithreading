@@ -1,0 +1,4 @@
+.vscode/
+app.log
+threading_demo
+data_race_demo
